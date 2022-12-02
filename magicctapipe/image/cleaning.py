@@ -1,15 +1,16 @@
 import copy
 import itertools
 import numpy as np
+import struct
 from scipy.sparse.csgraph import connected_components
 
 from ctapipe.image import (
-    tailcuts_clean,
     number_of_islands,
     hillas_parameters,
     timing_parameters,
     leakage_parameters,
-    apply_time_delta_cleaning,
+    brightest_island,
+    number_of_islands,
 )
 
 __all__ = [
@@ -18,6 +19,21 @@ __all__ = [
     'get_num_islands_MAGIC',
     'clean_image_params',
 ]
+
+
+def float_to_bin_int(num):
+    return ''.join('{:0>8b}'.format(c) for c in struct.pack('!f', num))
+
+
+def bin_to_float(binary):
+    return struct.unpack('!f', struct.pack('!I', int(binary, 2)))[0]
+
+
+def reduce_precision(charge):
+    return bin_to_float(bin((int(float_to_bin_int(charge), 2) + int(bin(0x00004000), 2)) & 0xffff8000))
+
+
+reduce_precision_vector = np.vectorize(reduce_precision)
 
 
 class MAGICClean:
@@ -55,17 +71,17 @@ class MAGICClean:
         if 'Window2NN' in configuration:
             self.Window2NN = configuration['Window2NN']
         else:
-            self.Window2NN = 0.82/1.639
+            self.Window2NN = 0.82 / 1.639
 
         if 'Window3NN' in configuration:
             self.Window3NN = configuration['Window3NN']
         else:
-            self.Window3NN = 1.15/1.639
+            self.Window3NN = 1.15 / 1.639
 
         if 'Window4NN' in configuration:
             self.Window4NN = configuration['Window4NN']
         else:
-            self.Window4NN = 1.80/1.639
+            self.Window4NN = 1.80 / 1.639
 
         if 'clipping' in configuration:
             self.clipping = configuration['clipping']
@@ -231,11 +247,11 @@ class MAGICClean:
         charge[charge > clipNN] = clipNN
 
         totcharge = np.sum(charge, axis=1)
-        meantime = np.sum(charge * self.event_pulse_time[NN],axis=1)/totcharge
+        meantime = np.sum(charge * self.event_pulse_time[NN], axis=1) / totcharge
 
-        meantime_proper = np.tile(meantime,(len(NN[0]),1)).transpose()
+        meantime_proper = np.tile(meantime, (len(NN[0]), 1)).transpose()
 
-        timeok = np.all(np.fabs(meantime_proper - self.event_pulse_time[NN]) < windowNN,axis=1)
+        timeok = np.all(np.fabs(meantime_proper - self.event_pulse_time[NN]) < windowNN, axis=1)
 
         selection = (timeok) * (totcharge > thresholdNN)
         mask[NN[selection]] = True
@@ -248,11 +264,11 @@ class MAGICClean:
         sumthresh3NN = self.SumThresh3NNPerPixel * 3 * self.configuration['picture_thresh']
         sumthresh4NN = self.SumThresh4NNPerPixel * 4 * self.configuration['picture_thresh']
 
-        clip2NN = 2.2  * sumthresh2NN/2.
-        clip3NN = 1.05 * sumthresh3NN/3.
-        clip4NN = 1.05 * sumthresh4NN/4.
+        clip2NN = 2.2 * sumthresh2NN / 2.
+        clip3NN = 1.05 * sumthresh3NN / 3.
+        clip4NN = 1.05 * sumthresh4NN / 4.
 
-        mask = np.asarray([False]*len(self.event_image))
+        mask = np.asarray([False] * len(self.event_image))
 
         if self.find_hotpixels:
 
@@ -360,31 +376,29 @@ class MAGICClean:
 
             neighbors = copy.copy(self.camera.neighbor_matrix)
             neighbors[self.unmapped_mask] = False
-            clean_neighbors = neighbors[mask][:, mask]
 
-            num_islands, labels = connected_components(clean_neighbors, directed=False)
+            n_islands, island_labels = number_of_islands(self.camera, mask)
 
-            island_ids = np.zeros(self.camera.n_pixels)
-            island_ids[mask] = labels + 1
+            mask_main = brightest_island(n_islands, island_labels, self.event_image)
 
-            # Finding the islands "sizes" (total charges)
-            island_sizes = np.zeros(num_islands)
-            for i in range(num_islands):
-                island_sizes[i] = self.event_image[mask][labels == i].sum()
-
-            # Disabling pixels for all islands save the brightest one
-            brightest_id = island_sizes.argmax() + 1
+            # print(f"Main islands pixels: {np.where(mask_main == True)[0]}")
 
             if self.configuration['use_time']:
-                brightest_pixel_times = self.event_pulse_time[mask & (island_ids == brightest_id)]
-                brightest_pixel_charges = self.event_image[mask & (island_ids == brightest_id)]
 
-                brightest_time = np.sum(brightest_pixel_times * brightest_pixel_charges**2) / np.sum(brightest_pixel_charges**2)
+                time_ave = np.average(self.event_pulse_time[mask_main], weights=self.event_image[mask_main] ** 2)
 
-                time_diff = np.abs(self.event_pulse_time - brightest_time)
+                # print(f"mean time main island (using ctapipe): {time_ave}")
 
-                mask[(self.event_image > 2*self.configuration['picture_thresh']) & (time_diff > 2*self.configuration['max_time_off'])] = False
-                mask[(self.event_image < 2*self.configuration['picture_thresh']) & (time_diff > self.configuration['max_time_off'])] = False
+                # print(f"Low charge pixels: {np.where(self.event_image[mask_main] < 2. * self.configuration['picture_thresh'])[0]}")
+
+                time_diffs = np.abs(self.event_pulse_time[mask] - time_ave)
+                time_limit_pixwise = np.where(
+                    self.event_image < (2. * self.configuration['picture_thresh']),
+                    self.configuration['max_time_off'],
+                    self.configuration['max_time_off'] * 2.
+                )[mask]
+
+                mask[mask] &= time_diffs < time_limit_pixwise
 
             for pix_id in np.where(mask)[0]:
                 if len(set(np.where(neighbors[pix_id] & mask)[0])) == 0:
@@ -453,16 +467,16 @@ class MAGICClean:
         if self.configuration['use_time']:
             boundary_pixels = copy.copy(pixels)
             neighbors = pixels_with_picture_neighbors_matrix[boundary_pixels]
-            neighbors[:,~core_mask]=False
+            neighbors[:, ~core_mask] = False
 
-            time_broadcast = np.tile(self.event_pulse_time,(len(self.event_image),1))
+            time_broadcast = np.tile(self.event_pulse_time, (len(self.event_image), 1))
             boundary_times = np.transpose(time_broadcast)[boundary_pixels]
             neighbor_times = time_broadcast[boundary_pixels]
 
             time_diff = np.abs(neighbor_times - boundary_times)
             time_selection = time_diff < self.configuration['max_time_diff']
 
-            hasNeighbor = np.minimum(np.sum(time_selection*neighbors,axis=1),1).astype(bool)
+            hasNeighbor = np.minimum(np.sum(time_selection * neighbors, axis=1), 1).astype(bool)
             pixels = boundary_pixels[hasNeighbor]
 
         selection = pixels[pixels_with_picture_neighbors_matrix.dot(core_mask)[pixels]]
@@ -552,6 +566,8 @@ class PixelTreatment:
 
         self.event_image[self.unsuitable_mask] = np.nanmean(image_broadcast,axis=1)
 
+        self.event_image[self.unsuitable_mask] = reduce_precision_vector(self.event_image[self.unsuitable_mask])
+
         self.unmapped_mask = copy.copy(unmapped_mask)
 
         self.unsuitable_mask_new = unsuitable_mask
@@ -586,6 +602,7 @@ class PixelTreatment:
 
             if p0>=0 and p1>=0 and np.fabs(times[p0] - times[p1]) < 250:
                 self.event_pulse_time[ipixel] = (times[p0] + times[p1])/2.0
+                self.event_pulse_time[ipixel] = reduce_precision_vector(self.event_pulse_time[ipixel])
 
     def interpolate_times_fast(self):
 
