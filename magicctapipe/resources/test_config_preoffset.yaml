@@ -1,3 +1,11 @@
+mc_tel_ids:
+    LST-1: 1
+    LST-2: 0
+    LST-3: 0
+    LST-4: 0
+    MAGIC-I: 2
+    MAGIC-II: 3
+
 LST:
     image_extractor:
         type: "LocalPeakWindowSum"
@@ -12,8 +20,8 @@ LST:
         extra_noise_in_bright_pixels: 2.08
 
     increase_psf:
-        use: true
-        fraction: 1.1
+        use: false
+        fraction: null
 
     tailcuts_clean:
         picture_thresh: 8
@@ -31,7 +39,7 @@ LST:
         threshold: 267
         fraction: 0.03
 
-    use_only_main_island: true
+    use_only_main_island: false
 
 
 MAGIC:
@@ -58,3 +66,12 @@ MAGIC:
         thr_low: 25
         tailcut: [12, 8]
         ring_completeness_threshold: 25
+
+event_coincidence:
+    timestamp_type_lst: "dragon_time"  # select "dragon_time", "tib_time" or "ucts_time"
+    window_half_width: "300 ns"
+    pre_offset_search: true
+    n_pre_offset_search_events: 100
+    time_offset:
+        start: "-10 us"
+        stop: "0 us"

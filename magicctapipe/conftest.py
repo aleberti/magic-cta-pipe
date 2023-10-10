@@ -54,6 +54,11 @@ def temp_DL1_gamma(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
+def temp_DL1_gamma_focal_exc(tmp_path_factory):
+    return tmp_path_factory.mktemp("DL1_gammas_focal_exc")
+
+
+@pytest.fixture(scope="session")
 def temp_DL1_gamma_train(tmp_path_factory):
     return tmp_path_factory.mktemp("DL1_gamma_train")
 
@@ -186,6 +191,11 @@ def temp_DL1_M_exc(tmp_path_factory):
 @pytest.fixture(scope="session")
 def temp_coinc(tmp_path_factory):
     return tmp_path_factory.mktemp("coincidence")
+
+
+@pytest.fixture(scope="session")
+def temp_coinc_preoff(tmp_path_factory):
+    return tmp_path_factory.mktemp("coincidence_pre_offset")
 
 
 @pytest.fixture(scope="session")
@@ -371,6 +381,12 @@ def dl1_lst(base_url, env_prefix):
 @pytest.fixture(scope="session")
 def config():
     config_path = resource_file("test_config.yaml")
+    return config_path
+
+
+@pytest.fixture(scope="session")
+def config_preoff():
+    config_path = resource_file("test_config_preoffset.yaml")
     return config_path
 
 
