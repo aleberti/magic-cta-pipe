@@ -4,7 +4,7 @@ to the DL1 stereo data. It also creates new subdirectories associated with
 the data level 2.
 
 Usage:
-$ DL1_to_DL2 -c configuration_file.yaml
+$ DL1_to_DL2 -c configuration_file.yaml -d list_dense.txt
 """
 import argparse
 import datetime
@@ -91,7 +91,10 @@ def ST_NSB_List(
                     file.write(f"{Run}\n")
 
 
-def bash_DL1Stereo_to_DL2(target_dir, source, env_name, cluster, RF_dir, df_LST, MC_v):
+
+def bash_DL1Stereo_to_DL2(
+    target_dir, source, env_name, cluster, RF_dir, df_LST, MC_v, dense_list
+):
     """
     This function generates the bashscript for running the DL1Stereo to DL2 analisys.
 
@@ -111,6 +114,8 @@ def bash_DL1Stereo_to_DL2(target_dir, source, env_name, cluster, RF_dir, df_LST,
         Dataframe collecting the LST1 runs (produced by the create_LST_table script)
     MC_v : str
         Version of MC processing
+    dense_list : list
+        List of sources that use the dense MC training line
     """
     if cluster != "SLURM":
         logger.warning(
@@ -137,6 +142,8 @@ def bash_DL1Stereo_to_DL2(target_dir, source, env_name, cluster, RF_dir, df_LST,
             dec = df_LST[df_LST.source == source].iloc[0]["MC_dec"]
             dec = str(dec).replace(".", "")
             RFdir = f"{RF_dir}/{period}/NSB{nsb}/{MC_v}/dec_{dec}/"
+            if source in dense_list:
+                RFdir = f"{RF_dir}/{period}/NSB{nsb}/{MC_v}/dec_{dec}_high_density/"
             if (not os.path.isdir(RFdir)) or (len(os.listdir(RFdir)) == 0):
                 continue
             slurm = slurm_lines(
@@ -183,8 +190,22 @@ def main():
         default="./config_general.yaml",
         help="Path to a configuration file",
     )
+    parser.add_argument(
+        "--dense_MC_sources",
+        "-d",
+        dest="dense_list",
+        type=str,
+        help="File with name of sources to be processed with the dense MC train line",
+    )
+
 
     args = parser.parse_args()
+    dense_list = []
+    if args.dense_list is not None:
+        with open(args.dense_list) as d:
+            dense_list = d.readlines()
+
+
     with open(
         args.config_file, "rb"
     ) as f:  # "rb" mode opens the file in binary format for reading
@@ -239,7 +260,7 @@ def main():
         )
 
         bash_DL1Stereo_to_DL2(
-            target_dir, source_name, env_name, cluster, RF_dir, df_LST, MC_v
+            target_dir, source_name, env_name, cluster, RF_dir, df_LST, MC_v, dense_list
         )
         list_of_dl2_scripts = np.sort(glob.glob(f"{source_name}_DL1_to_DL2*.sh"))
         if len(list_of_dl2_scripts) < 1:

@@ -4,7 +4,7 @@ to the DL2. It also creates new subdirectories associated with
 the data level 3.
 
 Usage:
-$ python new_DL2_to_DL3.py -c configuration_file.yaml
+$ python new_DL2_to_DL3.py -c configuration_file.yaml -d list_dense.txt
 """
 import argparse
 import glob
@@ -75,7 +75,9 @@ def configuration_DL3(target_dir, source_name, config_file, ra, dec):
         yaml.dump(conf, f, default_flow_style=False)
 
 
-def DL2_to_DL3(target_dir, source, env_name, IRF_dir, df_LST, cluster, MC_v):
+def DL2_to_DL3(
+    target_dir, source, env_name, IRF_dir, df_LST, cluster, MC_v, dense_list
+):
     """
     This function creates the bash scripts to run lst1_magic_dl2_to_dl3.py on the real data.
 
@@ -95,6 +97,8 @@ def DL2_to_DL3(target_dir, source, env_name, IRF_dir, df_LST, cluster, MC_v):
         Cluster system
     MC_v : str
         Version of MC processing
+    dense_list : list
+        List of sources that use the dense MC training line
     """
     if cluster != "SLURM":
         logger.warning(
@@ -129,6 +133,8 @@ def DL2_to_DL3(target_dir, source, env_name, IRF_dir, df_LST, cluster, MC_v):
             dec = df_LST[df_LST.source == source].iloc[0]["MC_dec"]
             dec = str(dec).replace(".", "")
             IRFdir = f"{IRF_dir}/{period}/NSB{nsb}/GammaTest/{MC_v}/g_dyn_0.9_th_glo_0.2/dec_{dec}/"
+            if source in dense_list:
+                IRFdir = f"{IRF_dir}/{period}/NSB{nsb}/GammaTest/{MC_v}/g_dyn_0.9_th_glo_0.2/dec_{dec}_high_density/"
             if (not os.path.isdir(IRFdir)) or (len(os.listdir(IRFdir)) == 0):
                 continue
             process_name = source
@@ -178,7 +184,20 @@ def main():
         help="Path to a configuration file",
     )
 
+    parser.add_argument(
+        "--dense_MC_sources",
+        "-d",
+        dest="dense_list",
+        type=str,
+        help="File with name of sources to be processed with the dense MC train line",
+    )
+
     args = parser.parse_args()
+    dense_list = []
+    if args.dense_list is not None:
+        with open(args.dense_list) as d:
+            dense_list = d.readlines()
+
     with open(
         args.config_file, "rb"
     ) as f:  # "rb" mode opens the file in binary format for reading
@@ -233,7 +252,16 @@ def main():
         ra = df_LST[df_LST.source == source_name].iloc[0]["ra"]
         dec = df_LST[df_LST.source == source_name].iloc[0]["dec"]
         configuration_DL3(target_dir, source_name, config_file, ra, dec)
-        DL2_to_DL3(target_dir, source_name, env_name, IRF_dir, df_LST, cluster, MC_v)
+        DL2_to_DL3(
+            target_dir,
+            source_name,
+            env_name,
+            IRF_dir,
+            df_LST,
+            cluster,
+            MC_v,
+            dense_list
+        )
         list_of_dl3_scripts = np.sort(glob.glob(f"{source_name}_DL2_to_DL3*.sh"))
         if len(list_of_dl3_scripts) < 1:
             logger.warning(f"No bash scripts for {source_name}")
